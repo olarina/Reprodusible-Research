@@ -1,0 +1,314 @@
+---
+title: Tornados and excessive heats are the most harmful to population health while
+  floods and hurricanes have the greatest economic consequences in the US
+author: "Olga Larina"
+date: "4/15/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Synopsis
+
+The U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database
+tracks characteristics of major storms and weather events in the United States,
+including when and where they occur, as well as estimates of any fatalities,
+injuries, and property damage. This data analysis addresses the following questions:
+
+1. Across the United States, which types of events are most harmful with respect
+to population health?
+2. Across the United States, which types of events have the greatest economic
+consequences?
+
+I cleaned data to get real types of events (according to categories from documentation), analized and summarized all fatalities, injuries, and property damages that have been recorded since 1993, because earlier only few types of events have been
+recorded. As soon as I want to compare events, I have to to take years for which
+there is more information. Most harmful with respect to population health are
+tornados, excessive heats, floods, flash floods, lightnings and thunderstorm winds.
+Floods, hurricanes, tornados and hails have the greatest economic consequences.
+
+# Data Processing
+
+I downloaded the data from the project task repository and filtered only variables
+that are important for the project. Also, convert dates to Data type.
+```{r cache=TRUE}
+library(dplyr)
+library(stringr)
+library(stringdist)
+library(ggplot2)
+if (!file.exists("./data"))
+    dir.create("./data")
+if (!file.exists("./data/repdata_data_StormData.csv.bz2"))
+{
+    fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+    download.file(fileURL, "./data/repdata_data_StormData.csv.bz2",method = "curl")
+}
+data <- read.csv("./data/repdata_data_StormData.csv.bz2",na.strings = "")
+subdata <- data[,c("BGN_DATE","EVTYPE","FATALITIES","INJURIES","PROPDMG", "PROPDMGEXP","CROPDMG","CROPDMGEXP")]
+dates <- subdata$BGN_DATE
+dates <- as.Date(as.character(dates),"%m/%d/%Y")
+subdata$BGN_DATE <- dates
+```
+EVTYPE contains types of events.
+```{r}
+length(unique(subdata$EVTYPE))
+```
+Are there so many categories for all years? Let's see.
+```{r}
+library(dplyr)
+subdata2 <- filter(subdata, BGN_DATE < as.Date("01/01/1993","%m/%d/%Y"))
+unique(subdata2$EVTYPE)
+
+subdata3 <- filter(subdata, BGN_DATE < as.Date("01/01/1994","%m/%d/%Y"))
+length(unique(subdata3$EVTYPE))
+```
+So, for 1993 we have a lot of data. Let's take 1993 and futher.
+```{r}
+subdata <- filter(subdata, BGN_DATE >= as.Date("01/01/1993","%m/%d/%Y"))
+```
+From the documentation I know that there have to be 48 categories, let's create
+variable for them.
+```{r}
+evTypes <- c("Astronomical Low Tide", "Avalanche", "Blizzard", "Coastal Flood", "Cold/Wind Chill","Debris Flow", "Dense Fog", "Dense Smoke", "Drought", "Dust Devil", "Dust Storm", "Excessive Heat", "Extreme Cold/Wind Chill", "Flash Flood", "Flood", "Frost/Freeze", "Funnel Cloud", "Freezing Fog", "Hail", "Heat", "Heavy Rain", "Heavy Snow", "High Surf", "High Wind", "Hurricane (Typhoon)", "Ice Storm", "Lake-Effect Snow", "Lakeshore Flood", "Lightning", "Marine Hail", "Marine High Wind", "Marine Strong Wind", "Marine Thunderstorm Wind", "Rip Current", "Seiche", "Sleet", "Storm Surge/Tide", "Strong Wind", "Thunderstorm Wind", "Tornado", "Tropical Depression", "Tropical Storm", "Tsunami", "Volcanic Ash", "Waterspout", "Wildfire", "Winter Storm", "Winter Weather")
+evTypes <- tolower(evTypes)
+```
+So, I have a lot of typos in the data. I have to convert subdata$EVTYPE to this
+48 categories. An easy step is to remove spaces and convert to lower case.
+```{r}
+library(dplyr)
+library(stringr)
+subdata <- mutate(subdata, EVTYPE = tolower(EVTYPE))
+subdata <- mutate(subdata, EVTYPE = str_trim(EVTYPE))
+```
+I noticed, that there are abbreviations of words "wind" and "thunderstorm",
+let's fix it.
+```{r}
+subdata$EVTYPE<-gsub("tstm","thunderstorm",subdata$EVTYPE,fixed = TRUE)
+subdata$EVTYPE<-gsub("wnd","wind",subdata$EVTYPE,fixed = TRUE)
+```
+The main idea of data cleaning is to take each category from evTypes and try to
+find it in subdata$EVTYPE.
+```{r cache = TRUE}
+grep("hurricane|typhoon",evTypes,value=T)
+unique(grep("hurricane|typhoon",subdata$EVTYPE,value=T))
+subdata$EVTYPE[grep("hurricane|typhoon",subdata$EVTYPE)] <- "hurricane (typhoon)"
+
+grep("tide",evTypes,value=T)
+unique(grep("tide",subdata$EVTYPE,value=T))
+subdata$EVTYPE[grep("blow-out tides|blow-out tide",subdata$EVTYPE)] <- "astronomical low tide"
+subdata$EVTYPE[grep("astronomical high tide|high wind and high tides|high tides|storm surge",subdata$EVTYPE)] <- "storm surge/tide"
+
+grep("flood",evTypes,value=T)
+unique(grep("flood",subdata$EVTYPE,value=T))
+s<-subdata$EVTYPE
+subdata$EVTYPE[grep("(flash.*flood(ing)?|flood(ing)?.*flash)",subdata$EVTYPE)] <- "flash flood"
+subdata$EVTYPE[grep("(coastal.*flood(ing)?|flood(ing)?.*coastal|cstl.*flood(ing)?|flood(ing)?.*cstl)",subdata$EVTYPE)] <- "coastal flood"
+subdata$EVTYPE[grep("(lake(shore)?.*flood(ing)?|flood(ing)?.*lake(shore)?)",subdata$EVTYPE)] <- "lakeshore flood"
+floodPos <- grepl("flood",subdata$EVTYPE) & !grepl("flash",subdata$EVTYPE) &
+        !grepl("coastal",subdata$EVTYPE) & !grepl("lakeshore",subdata$EVTYPE)
+subdata$EVTYPE[floodPos] <- "flood"
+
+
+unique(grep("extreme cold/wind chill",subdata$EVTYPE,value=T))
+subdata$EVTYPE[grep("cold",subdata$EVTYPE)] <- "extreme cold/wind chill"
+
+subdata$EVTYPE[grep("avalanche",subdata$EVTYPE)] <- "avalanche"
+subdata$EVTYPE[grep("blizzard",subdata$EVTYPE)] <- "blizzard"
+
+subdata$EVTYPE[grep("dense fog|fog|patchy dense fog",subdata$EVTYPE)] <- "dense fog"
+subdata$EVTYPE[grep("freezing fog|ice fog",subdata$EVTYPE)] <- "freezing fog"
+
+subdata$EVTYPE[grep("dense smoke|smoke",subdata$EVTYPE)] <- "dense smoke"
+subdata$EVTYPE[grep("drought",subdata$EVTYPE)] <- "drought"
+
+subdata$EVTYPE[grep("dust",subdata$EVTYPE)] <- "dust storm"
+
+subdata$EVTYPE[grep("heat",subdata$EVTYPE)] <- "excessive heat"
+
+subdata$EVTYPE[grep("frost|freeze",subdata$EVTYPE)] <- "frost/freeze"
+
+subdata$EVTYPE[grep("cloud",subdata$EVTYPE)] <- "funnel cloud"
+
+hailPos <- grepl("hail",subdata$EVTYPE) & !grepl("marine",subdata$EVTYPE)
+
+subdata$EVTYPE[hailPos] <- "hail"
+
+subdata$EVTYPE[grep("rain|wet",subdata$EVTYPE)] <- "heavy rain"
+
+lakeSnowPos <- grepl("(lake.*snow|snow.*lake)",subdata$EVTYPE)
+subdata$EVTYPE[lakeSnowPos] <- "lake-effect snow"
+subdata$EVTYPE[grepl("snow",subdata$EVTYPE) & ! lakeSnowPos] <- "heavy snow"
+
+subdata$EVTYPE[grep("surf",subdata$EVTYPE)] <- "high surf"
+
+## wind
+nonColdMarine <- !grepl("extreme cold/wind chill",subdata$EVTYPE)&!grepl("marine",subdata$EVTYPE)
+wind <- unique(grep("wind",subdata$EVTYPE,value=T))
+
+subdata$EVTYPE[grepl("(thunderstorm.*wind|wind.*thunderstorm)",subdata$EVTYPE)&nonColdMarine] <- "thunderstorm wind"
+subdata$EVTYPE[grepl("(high.*wind|wind.*high)",subdata$EVTYPE)&nonColdMarine] <- "high wind"
+subdata$EVTYPE[grepl("(strong.*wind|wind.*strong)",subdata$EVTYPE)&nonColdMarine] <- "strong wind"
+
+subdata$EVTYPE[grepl("(chill.*wind|wind.*chill)",subdata$EVTYPE)] <- "extreme cold/wind chill"
+unique(subdata$EVTYPE[grep("wind",subdata$EVTYPE)])
+subdata$EVTYPE<-gsub("winds","wind",subdata$EVTYPE,fixed = TRUE)
+subdata$EVTYPE<-gsub("thundertorm|tunderstorm|thundertsorm|thundeerstorm|thuderstorm|thunerstorm|thundestorm|thunderstrom|thunderestorm","thunderstorm",subdata$EVTYPE)
+
+nonTH <- !grepl("thunderstorm",subdata$EVTYPE) & !grepl("high",subdata$EVTYPE)
+subdata$EVTYPE[grepl("wind",subdata$EVTYPE) & nonColdMarine & nonTH] <- "strong wind"
+
+subdata$EVTYPE[grep("ice",subdata$EVTYPE)] <- "ice storm"
+subdata$EVTYPE[grep("lightning",subdata$EVTYPE)] <- "lightning"
+subdata$EVTYPE[grep("rip current",subdata$EVTYPE)] <- "rip current"
+subdata$EVTYPE[grep("sleet",subdata$EVTYPE)] <- "sleet"
+s<-subdata$EVTYPE
+
+subdata$EVTYPE[grep("tornado",subdata$EVTYPE)] <- "tornado"
+subdata$EVTYPE[grep("tropical storm",subdata$EVTYPE)] <- "tropical storm"
+subdata$EVTYPE[grep("volcanic",subdata$EVTYPE)] <- "volcanic ash"
+subdata$EVTYPE[grep("wildfire",subdata$EVTYPE)] <- "wildfire"
+
+subdata$EVTYPE[grep("winter storm",subdata$EVTYPE)] <- "winter storm"
+subdata$EVTYPE[grep("winter weather|winter mix|wintery mix|winter weather mix|winter weather/mix",subdata$EVTYPE)] <- "winter weather"
+subdata$EVTYPE[grep("warm|hot|record high temperatures|record temperatures",subdata$EVTYPE)] <- "heat"
+subdata$EVTYPE[grep("dry",subdata$EVTYPE)] <- "drought"
+subdata$EVTYPE[grep("summary|none|\\?",subdata$EVTYPE)] <- "others"
+
+subdata$EVTYPE[grepl("thunderstor",subdata$EVTYPE) & !grepl("marine",subdata$EVTYPE)] <- "thunderstorm wind"
+subdata$EVTYPE[grep("coastalstorm|coastal storm",subdata$EVTYPE)] <- "storm surge/tide"
+subdata$EVTYPE[grep("cool",subdata$EVTYPE)] <- "extreme cold/wind chill"
+```
+So, now we have categories.
+```{r}
+length(unique(subdata$EVTYPE))
+```
+Let's try to parse it one more time and if it doesn't work - replace with empty string.
+```{r cache = TRUE}
+library(stringdist)
+fixedType <- character(length(subdata$EVTYPE))
+for(i in 1:length(subdata$EVTYPE))
+{
+    type <- subdata$EVTYPE[i]
+    typeSplit <- strsplit(type,"/")
+    for (j in 1:length(typeSplit[[1]]))
+        num <- sum(which(amatch(evTypes,typeSplit[[1]][j],maxDist=2)==1),na.rm = TRUE)
+        if (num > 0)
+            fixedType[i] <- evTypes[num]
+}
+```
+
+# Results
+It's time to answer the questions. Let's take a look on fatalities and injuries.
+```{r}
+library(ggplot2)
+populationHealth <- data.frame(Event.Type = fixedType, Fatalities = subdata$FATALITIES,
+                               Injuries = subdata$INJURIES,stringsAsFactors = FALSE)
+popH <- aggregate(.~Event.Type, data = populationHealth, sum)
+popH$Event.Type[grep("^$",popH$Event.Type)] <- "others"
+
+topF <- quantile(popH$Fatalities, probs = 0.9)
+popHF <- filter(popH, popH$Fatalities> topF)
+print("The most harmful events: Fatalities")
+popHF
+
+gg<- ggplot(popHF,aes(x=reorder(Event.Type,-Fatalities),y = Fatalities)) +
+    geom_col() +
+    labs(x="Type of events", title = "The most harmful events: Fatalities")
+print(gg)
+
+topI <- quantile(popH$Injuries, probs = 0.9)
+popHI <- filter(popH, popH$Injuries> topI)
+print("The most harmful events: Injuries")
+popHI
+
+gg2<- ggplot(popHI,aes(x=reorder(Event.Type,-Injuries),y = Injuries)) +
+    geom_col() +
+    labs(x="Type of events", title = "The most harmful events: Injuries")
+print(gg2)
+```
+
+To calculate the cost of loss, I have to take a look on "PROPDMG", "PROPDMGEXP",
+"CROPDMG", "CROPDMGEXP". The "CROPDMGEXP" is the exponent values for "CROPDMG"
+(crop damage). In the sam way, "PROPDMG" and "PROPDMGEXP".
+```{r prop, cache = TRUE}
+rnum <- length(subdata$PROPDMGEXP)
+prop <- numeric(rnum)
+propExp <- as.character(subdata$PROPDMGEXP)
+propDmg <- subdata$PROPDMG
+for (i in 1:rnum)
+{
+    exp <- propExp[i]
+    pr <- propDmg[i]
+    if (!is.na(exp))
+    {
+        if (exp=="0")
+            prop[i] <- pr*10^0
+        if (exp=="1")
+            prop[i] <- pr*10^1
+        if (exp=="2")
+            prop[i] <- pr*10^2
+        if (exp=="3")
+            prop[i] <- pr*10^3
+        if (exp=="4")
+            prop[i] <- pr*10^4
+        if (exp=="5")
+            prop[i] <- pr*10^5
+        if (exp=="6")
+            prop[i] <- pr*10^6
+        if (exp=="7")
+            prop[i] <- pr*10^7
+        if (exp=="8")
+            prop[i] <- pr*10^8
+        if (exp == "B")
+            prop[i] <- pr*10^9
+        if (exp == "h" | exp == "H")
+            prop[i] <- pr*10^2
+        if (exp == "K")
+            prop[i] <- pr*10^3
+        if (exp == "m" | exp == "M")
+            prop[i] <- pr*10^6
+    }
+}
+```
+In the same way, I count crop.
+```{r crop, echo = FALSE, cache = TRUE}
+crop <- numeric(rnum)
+cropExp <- as.character(subdata$CROPDMGEXP)
+cropDmg <- subdata$CROPDMG
+for (i in 1:rnum)
+{
+    exp <- cropExp[i]
+    cr <- cropDmg[i]
+    if (!is.na(exp))
+    {
+        if (exp=="0")
+            crop[i] <- cr*10^0
+        if (exp=="2")
+            crop[i] <- cr*10^2
+        if (exp == "B")
+            crop[i] <- cr*10^9
+        if (exp == "K" | exp == "k")
+            crop[i] <- cr*10^3
+        if (exp == "m" | exp == "M")
+            crop[i] <- cr*10^6
+    }
+}
+```
+Let's take a look on the damage.
+```{r}
+economCons <- data.frame(Event.Type = fixedType, Damage = prop + crop,stringsAsFactors = FALSE)
+ec <- aggregate(Damage~Event.Type, data = economCons, sum)
+ec$Event.Type[grep("^$",ec$Event.Type)] <- "others"
+
+topD <- quantile(ec$Damage, probs = 0.9)
+ecD <- filter(ec, ec$Damage > topD)
+print("The most expensive events")
+ecD
+
+gg3<- ggplot(ecD,aes(x=reorder(Event.Type,-Damage),y = Damage)) +
+geom_col() +
+labs(x="Type of events", title = "The most expensive events")
+print(gg3)
+```
